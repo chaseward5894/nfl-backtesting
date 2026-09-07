@@ -18,27 +18,51 @@ under `utils/` need Open-Meteo / nflreadpy access.
 ## Quick start
 
 ```bash
-nflbt-run DATASET_FULL --out reports
-nflbt-run DATASET_2025 --out reports
+nflbt-run
 ```
 
-Each invocation creates a timestamped subdirectory
-(`reports/DATASET_FULL_20261201T123045/`) containing:
+A single invocation with no arguments runs walk-forward validation on
+both bundled datasets (`DATASET_FULL` and `DATASET_2025`) and writes
+one timestamped directory under `./reports/` containing 11 files
+flat (no per-file timestamps):
+
+```
+reports/run_<TS>/
+├── DATASET_FULL.metrics.txt
+├── DATASET_FULL.predictions.xlsx
+├── DATASET_FULL.predictions.pkl
+├── DATASET_FULL.config.yaml.copy
+├── DATASET_FULL.run_card.yaml
+├── DATASET_2025.metrics.txt
+├── DATASET_2025.predictions.xlsx
+├── DATASET_2025.predictions.pkl
+├── DATASET_2025.config.yaml.copy
+├── DATASET_2025.run_card.yaml
+└── comparison.txt
+```
+
+Each per-dataset file contains:
 
 - `metrics.txt` — six-section human-readable report (aggregate,
   by season timing, by season and timing, by edge size, vs market,
   vs market by season)
 - `predictions.xlsx` — eight-sheet workbook (predictions + 7 metric
   views)
-- `predictions.jsonl` — newline-delimited JSON, one prediction per line
 - `predictions.pkl` — pickle of the `Prediction` list
 - `config.yaml.copy` — copy of the config used for the run
-- `run_card.json` — run metadata (timestamp, command, host, git SHA,
+- `run_card.yaml` — run metadata (timestamp, command, host, git SHA,
   config SHA256, resolved model hyperparameters, n_predictions, ...)
+
+The cross-dataset file at the top of the run directory is:
+
+- `comparison.txt` — side-by-side performance (ATS, SU) and error
+  (MAE, RMSE, MedAE, Bias, LogLoss) comparison of DATASET_FULL vs
+  DATASET_2025, with delta and verdict per metric
 
 Default settings are read from `NFL-Model-UPDATED/config.yaml`
 (`regularization: linear`, `test_weeks: 1`, `training_weeks: 60`).
-Override with `--training-weeks N`, `--test-weeks N`, or `--config PATH`.
+Override the config file with `--config PATH`, or the output root
+with `--out PATH`.
 
 ## Bundled datasets
 

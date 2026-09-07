@@ -12,8 +12,8 @@ from .backtest import (
 from .report import (
     write_metrics_txt,
     write_predictions_xlsx,
-    write_predictions_jsonl,
     write_predictions_pkl,
+    write_comparison_report,
 )
 from .run_card import build_run_card, write_run_card
 
@@ -29,8 +29,8 @@ __all__ = [
     "TrainingPeriod",
     "write_metrics_txt",
     "write_predictions_xlsx",
-    "write_predictions_jsonl",
     "write_predictions_pkl",
+    "write_comparison_report",
     "build_run_card",
     "write_run_card",
 ]

@@ -14,6 +14,7 @@ dependencies = [
     "scipy",
     "openpyxl",
     "requests",
+    "pyyaml",
     "nflreadpy",
 ]
 
