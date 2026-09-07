@@ -20,10 +20,6 @@ dependencies = [
 
 [project.scripts]
 nflbt-run = "nflbetting_backtest.cli:main"
-nflbt-backfill-historical-weather = "nflbetting_backtest.utils.backfill.historical_weather:main"
-nflbt-backfill-historical-injuries = "nflbetting_backtest.utils.backfill.historical_injuries:main"
-nflbt-backfill-2025-weather = "nflbetting_backtest.utils.backfill.season_2025_weather:main"
-nflbt-backfill-2025-injuries = "nflbetting_backtest.utils.backfill.season_2025_injuries:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

@@ -1,6 +1,5 @@
 """Walk-forward validation + explicit-period training."""
 
-from dataclasses import dataclass
 from typing import Optional
 import polars as pl
 from nflbetting.model.rating_model import (
@@ -10,56 +9,10 @@ from nflbetting.model.rating_model import (
     predict_outcome,
 )
 from nflbetting.model.rating_model.defs import ModelConfig
+from nflbetting.model.model_lifecycle import TrainingPeriod
+from nflbetting.utils.cutoffs import filter_as_of
 
 from .metrics import Prediction
-
-
-# ---------------------------------------------------------------------------
-# TrainingPeriod (explicit start/end window)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class TrainingPeriod:
-    """An explicit (train_start, train_end, test_weeks) window."""
-    period_start: tuple[int, int]
-    period_end: tuple[int, int]
-    test_weeks: int = 4
-    label: Optional[str] = None
-    train_start: tuple[int, int] = None
-    train_end: tuple[int, int] = None
-    test_start: tuple[int, int] = None
-    test_end: tuple[int, int] = None
-
-    def __post_init__(self):
-        self._calc()
-        if self.label is None:
-            self.label = self._auto_label()
-
-    def _calc(self):
-        start_s, start_w = self.period_start
-        end_s, end_w = self.period_end
-        test_s = end_s
-        test_w = end_w - self.test_weeks + 1
-        while test_w < 1:
-            test_s -= 1
-            test_w += 18
-        train_end_s = test_s
-        train_end_w = test_w - 1
-        if train_end_w < 1:
-            train_end_s -= 1
-            train_end_w = 18
-        self.train_start = (start_s, start_w)
-        self.train_end = (train_end_s, train_end_w)
-        self.test_start = (test_s, test_w)
-        self.test_end = (end_s, end_w)
-
-    def _auto_label(self) -> str:
-        return (
-            f"{self.train_start[0]}w{self.train_start[1]}_"
-            f"{self.train_end[0]}w{self.train_end[1]}_"
-            f"test{self.test_start[0]}w{self.test_start[1]}_"
-            f"{self.test_end[1]}"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -89,11 +42,14 @@ def _trim_to_last_n_weeks(
 ) -> pl.DataFrame:
     """Keep rows where (season, week) is strictly before the test chunk's
     first week, then trim to the most recent n distinct (season, week) pairs.
+
+    The strict-less-than step is delegated to
+    ``nflbetting.utils.cutoffs.filter_as_of`` (single chokepoint
+    shared with the production feature pipeline; see Stage 2 of
+    ``track/roadmap.md``). The trim-to-last-n-weeks step is
+    framework-specific and stays here.
     """
-    train = df.filter(
-        (pl.col("season") < season)
-        | ((pl.col("season") == season) & (pl.col("week") < week))
-    )
+    train = filter_as_of(df, target_season=season, target_week=week)
     if train.is_empty():
         return train
     train = train.with_columns(
