@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nflbetting-backtest"
+version = "0.1.0"
+description = "Backtesting library for the nflbetting rating model"
+requires-python = ">=3.11"
+dependencies = [
+    "nflbetting @ file:///home/jailop/devel/chase/NFL-Model-UPDATED",
+    "polars",
+    "pandas",
+    "scipy",
+    "openpyxl",
+    "requests",
+    "nflreadpy",
+]
+
+[project.scripts]
+nflbt-run = "nflbetting_backtest.cli:main"
+nflbt-backfill-historical-weather = "nflbetting_backtest.utils.backfill.historical_weather:main"
+nflbt-backfill-historical-injuries = "nflbetting_backtest.utils.backfill.historical_injuries:main"
+nflbt-backfill-2025-weather = "nflbetting_backtest.utils.backfill.season_2025_weather:main"
+nflbt-backfill-2025-injuries = "nflbetting_backtest.utils.backfill.season_2025_injuries:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.package-data]
+nflbetting_backtest = ["../../data/**/*.parquet"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
