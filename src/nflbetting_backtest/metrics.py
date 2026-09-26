@@ -1,14 +1,19 @@
-"""Metrics dataclasses + aggregate_metrics. Reproduces metrics.txt format."""
+"""
+Metrics dataclasses + aggregate_metrics. Reproduces metrics.txt format.
+
+Sign convention: ``Prediction.spread_line`` is the market's expected home
+margin (positive = home favored), matching the nflverse ``spread_line``
+the backtest bundles. The model's ``predicted_margin`` uses the same
+convention, so the edge is ``predicted_margin - spread_line``. Sportsbook
+sources (e.g. The Odds API) use the opposite sign and must be negated at
+the boundary before being compared.
+"""
 
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 import numpy as np
 from scipy import stats
 
-
-# ---------------------------------------------------------------------------
-# Dataclasses (matching the v1 baseline metrics format)
-# ---------------------------------------------------------------------------
 
 @dataclass
 class ATSAccuracy:
@@ -117,9 +122,7 @@ class MetricsReport:
     market_by_season: dict
 
 
-# ---------------------------------------------------------------------------
 # Helpers (Wilson CI, t-value)
-# ---------------------------------------------------------------------------
 
 def _wilson(p: float, n: int, alpha: float = 0.05) -> tuple:
     if n <= 0:
@@ -135,9 +138,7 @@ def _t(n: int, alpha: float = 0.05) -> float:
     return stats.t.ppf(1 - alpha / 2, n - 1)
 
 
-# ---------------------------------------------------------------------------
 # Per-metric computations (verbatim port from baseline)
-# ---------------------------------------------------------------------------
 
 def _ats(predictions, alpha=0.05) -> ATSAccuracy:
     valid = [p for p in predictions
@@ -146,8 +147,10 @@ def _ats(predictions, alpha=0.05) -> ATSAccuracy:
         return ATSAccuracy(interval_size=1 - alpha)
     correct = pushes = no_edge = 0
     for p in valid:
+        # spread_line is already the market's home margin (positive =
+        # home favored); the edge is model minus market.
         market = p.spread_line
-        edge = p.predicted_margin + market
+        edge = p.predicted_margin - market
         if abs(p.actual_margin - market) < 0.25:
             pushes += 1
             continue
@@ -261,9 +264,7 @@ def _market(predictions) -> MarketComparison:
     )
 
 
-# ---------------------------------------------------------------------------
 # Sections (aggregate, by_season_timing, by_season, by_edge_size)
-# ---------------------------------------------------------------------------
 
 def _by_season_timing(predictions, early_weeks=6):
     early = [p for p in predictions if p.week <= early_weeks]
@@ -311,9 +312,7 @@ def _market_by_season(predictions):
     return {s: _market([p for p in predictions if p.season == s]) for s in seasons}
 
 
-# ---------------------------------------------------------------------------
 # Public aggregate
-# ---------------------------------------------------------------------------
 
 def aggregate_metrics(predictions: Iterable[Prediction]) -> MetricsReport:
     """Compute the full MetricsReport (matches metrics.txt sections)."""
