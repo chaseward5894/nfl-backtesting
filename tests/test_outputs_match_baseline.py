@@ -69,13 +69,25 @@ FILE_KINDS = [
 
 
 def _run_cli(tmp_path: Path) -> Path:
-    """Run `nflbt-run --out <tmp>/out` and return the run directory."""
+    """Run `nflbt-run --out <tmp>/out` and return the run directory.
+
+    The ``--no-regenerate-features`` flag preserves the
+    byte-for-byte reproducibility of the v1 baseline by reading
+    the bundled feature parquet instead of regenerating it from
+    the library. Without this flag, the default
+    ``regenerate_features: True`` would change the feature
+    values (and hence the metrics) from the locked baseline.
+    """
     out = tmp_path / "out"
     out.mkdir()
     env = os.environ.copy()
     env["PYTHONPATH"] = str(PACKAGE_ROOT)
     result = subprocess.run(
-        [sys.executable, "-m", "nflbetting_backtest.cli", "--out", str(out)],
+        [
+            sys.executable, "-m", "nflbetting_backtest.cli",
+            "--out", str(out),
+            "--no-regenerate-features",
+        ],
         env=env,
         capture_output=True,
         text=True,
@@ -183,6 +195,17 @@ def test_comparison_report_exists(run_dir):
     # Make sure the old aggregate-only rows are gone
     assert "ATS (correct/total)" not in text
     assert "SU (correct/total)" not in text
+
+
+def test_coverage_report_written(run_dir):
+    """W5: every dataset writes a coverage report next to its metrics."""
+    for dataset_name in ("DATASET_FULL", "DATASET_2025"):
+        path = run_dir / f"{dataset_name}.coverage.txt"
+        assert path.exists(), f"missing coverage report: {path.name}"
+        text = path.read_text()
+        assert f"dataset: {dataset_name}" in text
+        assert "predicted:" in text
+        assert "imputed_feature_cells:" in text
 
 
 def difflib_unified_diff(a, b, lineterm=""):

@@ -12,23 +12,23 @@ from typing import Any, Optional
 
 
 def _utc_now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _short_git_sha(cwd: Path) -> Optional[str]:
     try:
         sha = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
-            cwd=cwd, stderr=subprocess.DEVNULL, text=True,
+            cwd=cwd,
+            stderr=subprocess.DEVNULL,
+            text=True,
         ).strip()
-        dirty = (
-            subprocess.check_output(
-                ["git", "status", "--porcelain"],
-                cwd=cwd, stderr=subprocess.DEVNULL, text=True,
-            ).strip()
-        )
+        dirty = subprocess.check_output(
+            ["git", "status", "--porcelain"],
+            cwd=cwd,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
         return f"{sha}{'+dirty' if dirty else ''}" if sha else None
     except Exception:
         return None
@@ -48,8 +48,8 @@ def build_run_card(
     *,
     args: argparse.Namespace,
     dataset_name: str,
-    cfg,                         # AppConfig (from nflbetting.config.load_config)
-    model_cfg,                   # ModelConfig passed to walk_forward_validation
+    cfg,  # AppConfig (from nflbetting.config.load_config)
+    model_cfg,  # ModelConfig passed to walk_forward_validation
     training_weeks: int,
     test_weeks: int,
     feature_names: list[str],
@@ -75,9 +75,7 @@ def build_run_card(
         },
         "git": {
             "repo_root": str(repo_root.resolve()),
-            "nfl_model_sha": _short_git_sha(
-                repo_root / "NFL-Model-UPDATED"
-            ),
+            "nfl_model_sha": _short_git_sha(repo_root / "NFL-Model-UPDATED"),
             "nfl_model_backtest_sha": _short_git_sha(repo_root),
         },
         "config": {
@@ -93,6 +91,19 @@ def build_run_card(
                 "elo_k_factor": cfg.model.elo_k_factor,
                 "elo_start_rating": cfg.model.elo_start_rating,
                 "elo_home_advantage": cfg.model.elo_home_advantage,
+                "elo_hfa_mode": getattr(cfg.model, "elo_hfa_mode", "fixed"),
+                "elo_hfa_fixed": getattr(
+                    cfg.model,
+                    "elo_hfa_fixed",
+                    cfg.model.elo_home_advantage,
+                ),
+                "shrinkage_prior": getattr(cfg.model, "shrinkage_prior", 0.0),
+                "momentum_min_window": getattr(cfg.model, "momentum_min_window", 3),
+                "momentum_max_window": getattr(cfg.model, "momentum_max_window", 3),
+                "momentum_dispersion_threshold": getattr(
+                    cfg.model, "momentum_dispersion_threshold", 1.5
+                ),
+                "decay_halflife_weeks": getattr(cfg.model, "decay_halflife_weeks", 0.0),
                 "training_weeks": cfg.model.training_weeks,
                 "test_weeks": cfg.model.test_weeks,
                 "training_weeks_used": training_weeks,
@@ -124,13 +135,18 @@ def write_run_card(card: dict[str, Any], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as f:
         yaml.safe_dump(
-            card, f, sort_keys=False, allow_unicode=True, width=100,
+            card,
+            f,
+            sort_keys=False,
+            allow_unicode=True,
+            width=100,
         )
 
 
 def copy_config(source: Path, dest: Path) -> str:
     """Copy the config used for the run; return its sha256."""
     import shutil
+
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, dest)
     return _file_sha256(dest) or ""

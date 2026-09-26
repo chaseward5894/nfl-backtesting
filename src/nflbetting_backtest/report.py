@@ -10,7 +10,7 @@ from .metrics import MetricsReport, MetricsBlock, MarketComparison, Prediction
 
 
 # ---------------------------------------------------------------------------
-# Text metrics (matches review2026/baseline/metrics.txt byte-for-byte)
+# Text metrics (matches the v1 baseline format byte-for-byte)
 # ---------------------------------------------------------------------------
 
 def _write_block(label: str, block: MetricsBlock, fh) -> None:
@@ -134,7 +134,7 @@ def write_predictions_pkl(predictions: Iterable[Prediction], path: Path) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Predictions → xlsx (mirrors review2026/baseline/baseline.xlsx)
+# Predictions → xlsx (mirrors the v1 baseline workbook)
 # ---------------------------------------------------------------------------
 
 def _predictions_to_rows(predictions: Iterable[Prediction]) -> list[dict]:
@@ -284,7 +284,7 @@ def write_predictions_xlsx(
     *,
     features: Optional[pl.DataFrame] = None,
 ) -> int:
-    """Write 8-sheet workbook matching review2026/baseline/baseline.xlsx."""
+    """Write 8-sheet workbook matching the v1 baseline workbook."""
     import openpyxl
     from openpyxl import Workbook
     import polars as pl  # noqa
@@ -461,3 +461,48 @@ def write_comparison_report(
         fh.write(_err_line("Bias",  sb.bias_model, sb.bias_market,
                           sb.bias_diff, lower_is_better=False) + "\n")
         fh.write("\n")
+
+
+# ---------------------------------------------------------------------------
+# Walk-forward coverage (W5)
+# ---------------------------------------------------------------------------
+
+def write_coverage_txt(
+    diagnostics, path: Path, *, label: Optional[str] = None
+) -> None:
+    """Write the per-season coverage report for a walk-forward run.
+
+    ``diagnostics`` is a ``WalkForwardDiagnostics``; typed loosely to
+    avoid a report → backtest import cycle.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as fh:
+        fh.write("# walk-forward coverage\n\n")
+        if label:
+            fh.write(f"dataset: {label}\n")
+        fh.write(f"predicted: {diagnostics.predicted}\n")
+        fh.write(
+            f"imputed_feature_cells: {diagnostics.imputed_feature_cells}\n"
+        )
+        fh.write(f"skipped_chunks: {len(diagnostics.skipped_chunks)}\n\n")
+        fh.write("per season\n")
+        fh.write(
+            "  season  scheduled  with_odds  predicted  coverage  "
+            "missing_features  skipped_games  imputed_cells\n"
+        )
+        for coverage in diagnostics.coverage:
+            fh.write(
+                f"  {coverage.season:>6}  {coverage.scheduled:>9}  "
+                f"{coverage.scheduled_with_odds:>9}  "
+                f"{coverage.predicted:>9}  {coverage.coverage_pct:>8.1%}  "
+                f"{coverage.skipped_missing_features:>16}  "
+                f"{coverage.skipped_chunk_games:>13}  "
+                f"{coverage.imputed_feature_cells:>13}\n"
+            )
+        if diagnostics.skipped_chunks:
+            fh.write("\nskipped chunks\n")
+            for skip in diagnostics.skipped_chunks:
+                fh.write(
+                    f"  {skip.season} weeks={skip.weeks}: {skip.reason}\n"
+                )

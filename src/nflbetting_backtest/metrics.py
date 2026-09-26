@@ -7,7 +7,7 @@ from scipy import stats
 
 
 # ---------------------------------------------------------------------------
-# Dataclasses (matching review2026/baseline/metrics.py)
+# Dataclasses (matching the v1 baseline metrics format)
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -147,7 +147,7 @@ def _ats(predictions, alpha=0.05) -> ATSAccuracy:
     correct = pushes = no_edge = 0
     for p in valid:
         market = p.spread_line
-        edge = p.predicted_margin - market
+        edge = p.predicted_margin + market
         if abs(p.actual_margin - market) < 0.25:
             pushes += 1
             continue
