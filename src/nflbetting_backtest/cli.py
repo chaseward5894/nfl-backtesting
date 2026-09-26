@@ -1,10 +1,15 @@
-"""nflbt-run: walk-forward validation for both bundled datasets, one directory per run."""
+"""
+walk-forward validation
+"""
 
 import argparse
 import sys
 from datetime import datetime
 from pathlib import Path
-
+import polars as _pl
+from nflbetting.model.rating_model.defs import ModelConfig
+from nflbetting.predictions import filter_by_edge
+from nflbetting.config import load_config
 from .backtest import WalkForwardDiagnostics, walk_forward_validation
 from .datasets import (
     DATASET_FULL,
@@ -33,21 +38,8 @@ LIBRARY_ROOT = REPO_ROOT / "NFL-Model-UPDATED"
 
 
 def _resolve_data_dir(cfg) -> None:
-    """Force ``cfg.data_dir`` to an absolute path under
-    ``LIBRARY_ROOT``.
-
-    The library's feature pipeline reads files like
-    ``stadiums.csv`` and ``history_pbp.parquet`` relative to
-    ``cfg.data_dir``. When the framework's CLI is invoked from
-    a different cwd (e.g. an installed ``nflbt-run`` in a venv
-    bin/), ``./data`` resolves to the wrong directory. We
-    normalize ``cfg.data_dir`` to ``<LIBRARY_ROOT>/<cfg.data_dir>``
-    so the pipeline always finds the library's data files
-    regardless of where the framework was invoked from.
-
-    Mutates ``cfg`` in place; returns ``None``. The
-    normalization is idempotent: a path that is already
-    absolute is returned unchanged.
+    """
+    Force `cfg.data_dir` to an absolute path
     """
     raw = Path(cfg.data_dir)
     if raw.is_absolute():
@@ -62,14 +54,8 @@ def _resolve_dataset(
     run_dir: Path | None = None,
     use_regenerated: bool = False,
 ) -> Dataset:
-    """Return a Dataset, optionally with library-regenerated features.
-
-    - ``use_regenerated=True`` calls
-      :func:`regenerate_features_for_dataset` for the dataset's
-      schedule range and writes the parquet under
-      ``run_dir/features/<dataset>/features.parquet``. The
-      returned Dataset wraps that parquet.
-    - ``use_regenerated=False`` returns the bundled Dataset.
+    """
+    Return a Dataset, optionally with library-regenerated features
     """
     if not use_regenerated:
         if name == "DATASET_FULL":
@@ -77,17 +63,17 @@ def _resolve_dataset(
         if name == "DATASET_2025":
             return DATASET_2025
         raise SystemExit(f"Unknown dataset: {name}")
-
-    # Regenerate from the library using the supplied config.
     if cfg is None or run_dir is None:
         raise ValueError("regenerated features require cfg and run_dir")
     base = DATASET_FULL if name == "DATASET_FULL" else DATASET_2025
+    # Regenerate the dataset's full *feature* history
+    seasons = sorted(base.features["season"].unique().to_list())
     print(
         f"regenerating features for {name} from library "
-        f"({len(base.schedule['season'].unique())} seasons)...",
+        f"({len(seasons)} seasons)...",
         file=sys.stderr,
     )
-    df = regenerate_features_for_dataset(cfg, base.schedule)
+    df = regenerate_features_for_dataset(cfg, base.schedule, seasons=seasons)
     out_dir = run_dir / "features" / name.lower()
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "features.parquet"
@@ -99,19 +85,10 @@ def _resolve_dataset(
     return load_dataset_with_features(name, out_path)
 
 
-def _build_model_config(cfg, dataset: Dataset, feature_names: list[str]):
-    """Build the framework ``ModelConfig`` from the app config.
-
-    The framework does not own feature engineering (Stage 5/6/7
-    settings flow through the *bundled feature parquets* that
-    the library pre-computes). The framework only needs to
-    record them in the run card (audit trail). What the
-    framework *does* own is the fit path, which now accepts
-    ``sample_weight`` for Stage 9; that is handled in
-    ``backtest._train_and_collect_weights`` rather than here.
+def _build_model_config(cfg, feature_names: list[str]):
     """
-    from nflbetting.model.rating_model.defs import ModelConfig
-
+    Build the framework `ModelConfig` from the app config
+    """
     return ModelConfig(
         model_type=cfg.model.regularization,
         alpha=cfg.model.alpha,
@@ -124,7 +101,7 @@ def _build_model_config(cfg, dataset: Dataset, feature_names: list[str]):
 
 
 def _make_run_dir(out_root: Path) -> tuple[Path, datetime]:
-    """out_root/run_<YYYYMMDDTHHMMSS>/ — one directory per CLI invocation."""
+    """one directory per CLI invocation"""
     now = datetime.now()
     slug = now.strftime("%Y%m%dT%H%M%S")
     run_dir = out_root / f"run_{slug}"
@@ -133,11 +110,7 @@ def _make_run_dir(out_root: Path) -> tuple[Path, datetime]:
 
 
 def _effective_skip_criteria(args, cfg):
-    """Resolve the live-skip thresholds.
-
-    Explicit ``--filter-*`` flags win; otherwise the config's
-    ``skip_criteria`` block is used when enabled.
-    """
+    """Resolve the live-skip thresholds"""
     if (
         args.filter_edge is not None
         or args.filter_prob is not None
@@ -159,13 +132,8 @@ def _run_one_dataset(
     test_weeks: int,
     run_dir: Path,
 ):
-    """Train + predict + write outputs for one dataset.
-
-    Returns ``(predictions, report, filtered_report, n_filtered)``;
-    ``filtered_report`` is ``None`` when no skip criteria applied.
-    """
-    model_cfg = _build_model_config(cfg, dataset, dataset.feature_names)
-
+    """Train + predict + write outputs for one dataset"""
+    model_cfg = _build_model_config(cfg, dataset.feature_names)
     diagnostics = WalkForwardDiagnostics()
     preds = walk_forward_validation(
         dataset.features,
@@ -177,9 +145,7 @@ def _run_one_dataset(
         strict=args.strict,
         diagnostics=diagnostics,
     )
-
     report = aggregate_metrics(preds)
-
     write_metrics_txt(report, run_dir / f"{dataset.name}.metrics.txt")
     write_coverage_txt(
         diagnostics,
@@ -194,20 +160,12 @@ def _run_one_dataset(
     )
     write_predictions_pkl(preds, run_dir / f"{dataset.name}.predictions.pkl")
     copy_config(args.config, run_dir / f"{dataset.name}.config.yaml.copy")
-
-    # Stage 10 / W7: the live skip criteria. Explicit --filter-* flags
-    # win; otherwise the config's skip_criteria block is used when
-    # enabled. Filtering goes through the library's filter_by_edge so
-    # the same predicate applies to the live refresh.py path.
     filter_edge, filter_prob, filter_spread = _effective_skip_criteria(
         args, cfg
     )
     filtered_report = None
     n_filtered = 0
     if any(v is not None for v in (filter_edge, filter_prob, filter_spread)):
-        from nflbetting.predictions import filter_by_edge
-        import polars as _pl
-
         preds_df = _pl.DataFrame(
             [
                 {
@@ -249,7 +207,6 @@ def _run_one_dataset(
             f"{run_dir}/{dataset.name}.*filtered.*",
             file=sys.stderr,
         )
-
     card = build_run_card(
         args=args,
         dataset_name=dataset.name,
@@ -264,7 +221,6 @@ def _run_one_dataset(
         timestamp=datetime.now(),
     )
     write_run_card(card, run_dir / f"{dataset.name}.run_card.yaml")
-
     print(
         f"{dataset.name}: wrote {len(preds)} predictions -> "
         f"{run_dir}/{dataset.name}.*",
@@ -283,13 +239,8 @@ def _run_pass_on_2025(
     test_weeks: int,
     label: str,
 ):
-    """One walk-forward pass restricted to DATASET_2025.schedule.
-
-    `features_source` provides the historical context (so the rolling
-    window has prior weeks to train on); `feature_names` controls
-    which columns the model sees (e.g. zeroing out injury/weather).
-    """
-    model_cfg = _build_model_config(cfg, features_source, feature_names)
+    """One walk-forward pass restricted to DATASET_2025.schedule"""
+    model_cfg = _build_model_config(cfg, feature_names)
     preds = walk_forward_validation(
         features_source.features,
         DATASET_2025.schedule,
@@ -308,6 +259,7 @@ def _run_pass_on_2025(
 
 
 def main(argv=None) -> int:
+    """main function"""
     parser = argparse.ArgumentParser(
         prog="nflbt-run",
         description=(
@@ -339,7 +291,7 @@ def main(argv=None) -> int:
         "--filter-edge",
         type=float,
         default=None,
-        help="Stage 10 live-skip criteria: minimum |model_spread - "
+        help="Live-skip criteria: minimum |model_spread - "
         "market_spread|, in points. When set (with or without "
         "--filter-prob / --filter-spread), the framework writes "
         "a second metrics_filtered.txt / predictions_filtered.* "
@@ -350,14 +302,14 @@ def main(argv=None) -> int:
         "--filter-prob",
         type=float,
         default=None,
-        help="Stage 10 live-skip criteria: minimum model confidence "
+        help="Live-skip criteria: minimum model confidence "
         "max(p, 1-p). Default: no filter.",
     )
     parser.add_argument(
         "--filter-spread",
         type=float,
         default=None,
-        help="Stage 10 live-skip criteria: maximum |market_spread| "
+        help="Live-skip criteria: maximum |market_spread| "
         "in points. Default: no filter.",
     )
     regen_group = parser.add_mutually_exclusive_group()
@@ -375,8 +327,8 @@ def main(argv=None) -> int:
         dest="regenerate_features",
         action="store_false",
         default=None,
-        help="Use the bundled feature parquet (v1 baseline). "
-        "Required for byte-for-byte reproduction of the v1 "
+        help="Use the bundled feature parquet. "
+        "Required for byte-for-byte reproduction "
         "baseline; ignored if --features-source is also set.",
     )
     parser.add_argument(
@@ -389,16 +341,11 @@ def main(argv=None) -> int:
         "--regenerate-features / --no-regenerate-features.",
     )
     args = parser.parse_args(argv)
-
-    from nflbetting.config import load_config
-
     cfg = load_config(args.config)
-    training_weeks = cfg.model.training_weeks
-    test_weeks = cfg.model.test_weeks
+    training_weeks = cfg.model.training_weeks #pylint: disable=no-member
+    test_weeks = cfg.model.test_weeks #pylint: disable=no-member
 
-    # Resolve the feature-source policy. Explicit CLI flags
-    # take precedence over cfg.regenerate_features; an explicit
-    # --features-source overrides both.
+    # Resolve the feature-source policy
     if args.features_source is not None:
         regenerate_features = False
         features_source_override = args.features_source
@@ -408,20 +355,15 @@ def main(argv=None) -> int:
     else:
         regenerate_features = bool(getattr(cfg, "regenerate_features", True))
         features_source_override = None
-
     run_dir, _run_ts = _make_run_dir(args.out.resolve())
-
-    # 1. The two main per-dataset walk-forwards (full history vs 2025).
     results: dict[str, tuple] = {}
     dataset_by_name: dict[str, Dataset] = {}
-    # Normalize data_dir to the library's data directory so the
-    # regeneration path (and any future feature pipeline calls
-    # by the framework) always find stadiums.csv / history_*.parquet
-    # regardless of where the framework was invoked from.
     _resolve_data_dir(cfg)
     for dataset_name in ("DATASET_FULL", "DATASET_2025"):
         if features_source_override is not None:
-            dataset = load_dataset_with_features(dataset_name, features_source_override)
+            dataset = load_dataset_with_features(
+                dataset_name, features_source_override
+            )
         else:
             dataset = _resolve_dataset(
                 dataset_name,
@@ -439,22 +381,11 @@ def main(argv=None) -> int:
             run_dir=run_dir,
         )
 
-    # 2. The comparison report: both models scored on the SAME 2025
-    # games. Re-run a walk-forward restricted to DATASET_2025.schedule:
-    #   a) using DATASET_FULL.features (zeroed impact cols) so the model
-    #      sees only the historical baseline signal;
-    #   b) using DATASET_2025.features (real overlays) so the model
-    #      also sees injury / weather impact.
-    # Both predict the same 2025 games; we compare each against market.
-    # When the framework regenerated features per run, both
-    # ``dataset_by_name`` entries point at the regenerated parquet,
-    # so the comparison exercises the live config rather than the
-    # bundled v1 artifact.
+    # The comparison report
     full_dataset = dataset_by_name["DATASET_FULL"]
     short_dataset = dataset_by_name["DATASET_2025"]
     full_feature_names = list(full_dataset.feature_names)
     short_feature_names = list(short_dataset.feature_names)
-
     full_on_2025_preds, full_on_2025_report = _run_pass_on_2025(
         features_source=full_dataset,
         feature_names=full_feature_names,
@@ -473,7 +404,6 @@ def main(argv=None) -> int:
         test_weeks=test_weeks,
         label="2025-features on 2025 schedule",
     )
-
     filter_sections = []
     for dataset_name in ("DATASET_FULL", "DATASET_2025"):
         preds_i, report_i, filtered_report_i, n_filtered_i = results[
@@ -489,7 +419,6 @@ def main(argv=None) -> int:
                     "n_filtered": n_filtered_i,
                 }
             )
-
     full_ids = {p.game_id for p in full_on_2025_preds}
     short_ids = {p.game_id for p in short_on_2025_preds}
     if full_ids != short_ids:
@@ -498,7 +427,6 @@ def main(argv=None) -> int:
             f"short={len(short_ids)} common={len(full_ids & short_ids)}",
             file=sys.stderr,
         )
-
     write_comparison_report(
         full_report=full_on_2025_report,
         short_report=short_on_2025_report,
@@ -511,7 +439,6 @@ def main(argv=None) -> int:
         paired_predictions=(full_on_2025_preds, short_on_2025_preds),
     )
     print(f"comparison -> {run_dir / 'comparison.txt'}", file=sys.stderr)
-
     return 0
 
 

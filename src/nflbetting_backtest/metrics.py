@@ -1,13 +1,4 @@
-"""
-Metrics dataclasses + aggregate_metrics. Reproduces metrics.txt format.
-
-Sign convention: ``Prediction.spread_line`` is the market's expected home
-margin (positive = home favored), matching the nflverse ``spread_line``
-the backtest bundles. The model's ``predicted_margin`` uses the same
-convention, so the edge is ``predicted_margin - spread_line``. Sportsbook
-sources (e.g. The Odds API) use the opposite sign and must be negated at
-the boundary before being compared.
-"""
+"""Metrics dataclasses + aggregate_metrics"""
 
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
@@ -122,8 +113,6 @@ class MetricsReport:
     market_by_season: dict
 
 
-# Helpers (Wilson CI, t-value)
-
 def _wilson(p: float, n: int, alpha: float = 0.05) -> tuple:
     if n <= 0:
         return 0.0, 0.0
@@ -135,14 +124,34 @@ def _wilson(p: float, n: int, alpha: float = 0.05) -> tuple:
 
 
 def _t(n: int, alpha: float = 0.05) -> float:
+    """t critical value; `0.0` when there are too few samples for a CI"""
+    if n <= 1:
+        return 0.0
     return stats.t.ppf(1 - alpha / 2, n - 1)
 
 
-# Per-metric computations (verbatim port from baseline)
+def _sample_std(values) -> float:
+    """Sample std, or `0.0` for a single observation"""
+    values = np.asarray(values, dtype=float)
+    if values.size < 2:
+        return 0.0
+    return float(np.std(values, ddof=1))
+
+
+def _sample_var(values) -> float:
+    """Sample variance, or `0.0` for a single observation"""
+    values = np.asarray(values, dtype=float)
+    if values.size < 2:
+        return 0.0
+    return float(np.var(values, ddof=1))
+
 
 def _ats(predictions, alpha=0.05) -> ATSAccuracy:
-    valid = [p for p in predictions
-             if p.spread_line is not None and p.actual_margin is not None]
+    valid = [
+        p
+        for p in predictions
+        if p.spread_line is not None and p.actual_margin is not None
+    ]
     if not valid:
         return ATSAccuracy(interval_size=1 - alpha)
     correct = pushes = no_edge = 0
@@ -178,23 +187,33 @@ def _spread(predictions, alpha=0.05) -> SpreadError:
     n = len(errs)
     t = _t(n, alpha)
     mae = float(np.mean(abs_errs))
-    mae_se = float(np.std(abs_errs, ddof=1) / np.sqrt(n))
-    sq = errs ** 2
+    mae_se = _sample_std(abs_errs) / np.sqrt(n)
+    sq = errs**2
     rmse = float(np.sqrt(np.mean(sq)))
     mse = float(np.mean(sq))
-    mse_var = float(np.var(sq, ddof=1) / n)
+    mse_var = _sample_var(sq) / n
     rmse_se = float(np.sqrt(mse_var / (4 * mse))) if mse > 0 else 0.0
     rng = np.random.default_rng(42)
-    medians = [np.median(rng.choice(abs_errs, n, replace=True)) for _ in range(1000)]
+    medians = [
+        np.median(rng.choice(abs_errs, n, replace=True)) for _ in range(1000)
+    ]
     med_lo = float(np.percentile(medians, 2.5))
     med_hi = float(np.percentile(medians, 97.5))
     bias = float(np.mean(errs))
-    bias_se = float(np.std(errs, ddof=1) / np.sqrt(n))
+    bias_se = _sample_std(errs) / np.sqrt(n)
     return SpreadError(
-        mae, mae - t * mae_se, mae + t * mae_se,
-        rmse, rmse - t * rmse_se, rmse + t * rmse_se,
-        float(np.median(abs_errs)), med_lo, med_hi,
-        bias, bias - t * bias_se, bias + t * bias_se,
+        mae,
+        mae - t * mae_se,
+        mae + t * mae_se,
+        rmse,
+        rmse - t * rmse_se,
+        rmse + t * rmse_se,
+        float(np.median(abs_errs)),
+        med_lo,
+        med_hi,
+        bias,
+        bias - t * bias_se,
+        bias + t * bias_se,
         1 - alpha,
     )
 
@@ -204,8 +223,7 @@ def _su(predictions, alpha=0.05) -> SUAccuracy:
     if not valid:
         return SUAccuracy(interval_size=1 - alpha)
     correct = sum(
-        1 for p in valid
-        if (p.predicted_margin > 0) == (p.actual_margin > 0)
+        1 for p in valid if (p.predicted_margin > 0) == (p.actual_margin > 0)
     )
     pv = correct / len(valid)
     lo, hi = _wilson(pv, len(valid), alpha)
@@ -213,8 +231,12 @@ def _su(predictions, alpha=0.05) -> SUAccuracy:
 
 
 def _log_loss(predictions, alpha=0.05, eps=1e-15) -> LogLoss:
-    valid = [p for p in predictions
-             if p.actual_margin is not None and p.predicted_win_probability is not None]
+    valid = [
+        p
+        for p in predictions
+        if p.actual_margin is not None
+        and p.predicted_win_probability is not None
+    ]
     if not valid:
         return LogLoss(interval_size=1 - alpha)
     losses = []
@@ -226,7 +248,7 @@ def _log_loss(predictions, alpha=0.05, eps=1e-15) -> LogLoss:
     n = len(arr)
     mean = float(np.mean(arr))
     t = _t(n, alpha)
-    se = float(np.std(arr, ddof=1) / np.sqrt(n))
+    se = _sample_std(arr) / np.sqrt(n)
     return LogLoss(mean, mean - t * se, mean + t * se, 1 - alpha, n)
 
 
@@ -240,8 +262,11 @@ def _block(predictions) -> MetricsBlock:
 
 
 def _market(predictions) -> MarketComparison:
-    valid = [p for p in predictions
-             if p.spread_line is not None and p.actual_margin is not None]
+    valid = [
+        p
+        for p in predictions
+        if p.spread_line is not None and p.actual_margin is not None
+    ]
     if not valid:
         return MarketComparison()
     model_err = np.array([p.predicted_margin - p.actual_margin for p in valid])
@@ -249,13 +274,19 @@ def _market(predictions) -> MarketComparison:
     return MarketComparison(
         mae_model=float(np.mean(np.abs(model_err))),
         mae_market=float(np.mean(np.abs(market_err))),
-        mae_diff=float(np.mean(np.abs(model_err)) - np.mean(np.abs(market_err))),
-        rmse_model=float(np.sqrt(np.mean(model_err ** 2))),
-        rmse_market=float(np.sqrt(np.mean(market_err ** 2))),
-        rmse_diff=float(np.sqrt(np.mean(model_err ** 2)) - np.sqrt(np.mean(market_err ** 2))),
+        mae_diff=float(
+            np.mean(np.abs(model_err)) - np.mean(np.abs(market_err))
+        ),
+        rmse_model=float(np.sqrt(np.mean(model_err**2))),
+        rmse_market=float(np.sqrt(np.mean(market_err**2))),
+        rmse_diff=float(
+            np.sqrt(np.mean(model_err**2)) - np.sqrt(np.mean(market_err**2))
+        ),
         median_ae_model=float(np.median(np.abs(model_err))),
         median_ae_market=float(np.median(np.abs(market_err))),
-        median_ae_diff=float(np.median(np.abs(model_err)) - np.median(np.abs(market_err))),
+        median_ae_diff=float(
+            np.median(np.abs(model_err)) - np.median(np.abs(market_err))
+        ),
         bias_model=float(np.mean(model_err)),
         bias_market=float(np.mean(market_err)),
         bias_diff=float(np.mean(model_err) - np.mean(market_err)),
@@ -263,8 +294,6 @@ def _market(predictions) -> MarketComparison:
         interval_size=0.95,
     )
 
-
-# Sections (aggregate, by_season_timing, by_season, by_edge_size)
 
 def _by_season_timing(predictions, early_weeks=6):
     early = [p for p in predictions if p.week <= early_weeks]
@@ -274,7 +303,9 @@ def _by_season_timing(predictions, early_weeks=6):
 
 def _by_season(predictions):
     seasons = sorted({p.season for p in predictions if p.season is not None})
-    return {s: _block([p for p in predictions if p.season == s]) for s in seasons}
+    return {
+        s: _block([p for p in predictions if p.season == s]) for s in seasons
+    }
 
 
 def _by_season_and_timing(predictions, early_weeks=6):
@@ -300,26 +331,27 @@ def _by_edge_size(predictions):
     ]
     out = {}
     for lo, hi, label in bins:
-        subset = [p for p in predictions
-                  if p.spread_line is not None
-                  and lo <= abs(p.predicted_margin - p.spread_line) < hi]
+        subset = [
+            p
+            for p in predictions
+            if p.spread_line is not None
+            and lo <= abs(p.predicted_margin - p.spread_line) < hi
+        ]
         out[label] = ATSPerEdge(label, lo, hi, _ats(subset))
     return out
 
 
 def _market_by_season(predictions):
     seasons = sorted({p.season for p in predictions if p.season is not None})
-    return {s: _market([p for p in predictions if p.season == s]) for s in seasons}
+    return {
+        s: _market([p for p in predictions if p.season == s]) for s in seasons
+    }
 
-
-# ---------------------------------------------------------------------------
-# Paired (same-game) comparison and significance (W19)
-# ---------------------------------------------------------------------------
 
 def ats_outcomes(predictions) -> dict:
     """Per-game ATS correctness on decisive games (home-margin convention).
 
-    Mirrors ``_ats``: pushes and exact model/market ties are omitted, so
+    Mirrors `_ats`: pushes and exact model/market ties are omitted, so
     keys are the games both models would grade.
     """
     outcomes: dict = {}
@@ -347,7 +379,7 @@ def paired_significance(
 
     ATS uses McNemar's exact test on the games both sets grade; MAE/RMSE
     use a paired bootstrap of the per-game errors on the games both sets
-    have an actual margin for. ``short`` is the candidate model.
+    have an actual margin for. `short` is the candidate model.
     """
     full_outcomes = ats_outcomes(full_predictions)
     short_outcomes = ats_outcomes(short_predictions)
@@ -355,8 +387,12 @@ def paired_significance(
     n_ats = len(common_ats)
     full_wins = sum(full_outcomes[g] for g in common_ats)
     short_wins = sum(short_outcomes[g] for g in common_ats)
-    b10 = sum(1 for g in common_ats if full_outcomes[g] and not short_outcomes[g])
-    b01 = sum(1 for g in common_ats if not full_outcomes[g] and short_outcomes[g])
+    b10 = sum(
+        1 for g in common_ats if full_outcomes[g] and not short_outcomes[g]
+    )
+    b01 = sum(
+        1 for g in common_ats if not full_outcomes[g] and short_outcomes[g]
+    )
     mcnemar_p = (
         float(stats.binomtest(b01, b01 + b10, 0.5).pvalue)
         if b01 + b10 > 0
@@ -432,10 +468,8 @@ def paired_significance(
     }
 
 
-# Public aggregate
-
 def aggregate_metrics(predictions: Iterable[Prediction]) -> MetricsReport:
-    """Compute the full MetricsReport (matches metrics.txt sections)."""
+    """Compute the full MetricsReport (matches metrics.txt sections)"""
     preds = list(predictions)
     return MetricsReport(
         aggregate=_block(preds),

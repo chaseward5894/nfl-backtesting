@@ -1,24 +1,5 @@
 """
-nflbt-regen-features: regenerate per-season features from the library.
-
-The backtesting framework ships with bundled feature parquets
-under ``data/dataset_full/`` and ``data/dataset_2025/`` that
-were computed once and frozen. Those parquets do NOT reflect
-the new library knobs (shrinkage, momentum window, per-season
-HFA). To exercise the new knobs in the framework's
-walk-forward, the user must regenerate the feature parquet
-from the library with their config.yaml.
-
-This module provides both:
-
-- :func:`regenerate_features_for_dataset`: the library-side
-  helper that calls ``create_model_dataset`` for each season
-  in the schedule range and returns a single concatenated
-  DataFrame with the same schema as the bundled parquet.
-- :func:`main`: the ``nflbt-regen-features`` CLI entry
-  point. Writes one parquet per dataset under the user's
-  chosen output directory; the user then points
-  ``nflbt-run --features-source`` at the regenerated path.
+regenerate per-season features from the library
 """
 
 from __future__ import annotations
@@ -34,15 +15,7 @@ from nflbetting.pipelines.model import create_model_dataset
 
 
 def _season_from_game_id(df: pl.DataFrame) -> pl.DataFrame:
-    """Add a ``season`` int64 column derived from ``game_id``.
-
-    The bundled feature parquet carries ``season`` as a top-
-    level column. The library's ``create_model_dataset``
-    omits it (the season is encoded in the ``game_id``
-    prefix). This helper restores it so the regenerated
-    parquet has the schema the framework's
-    ``walk_forward_validation`` expects.
-    """
+    """Add a ``season`` int64 column derived from ``game_id``"""
     return df.with_columns(
         pl.col("game_id").str.slice(0, 4).cast(pl.Int64).alias("season")
     )
@@ -207,13 +180,18 @@ def main(argv=None) -> int:
 
     for dataset_name in args.datasets:
         dataset = by_name[dataset_name]
+        # Default to the dataset's full feature history, not just the
+        # schedule seasons (DATASET_2025's schedule is 2025-only).
+        seasons = args.seasons or sorted(
+            dataset.features["season"].unique().to_list()
+        )
         print(
             f"regenerating {dataset_name} features "
-            f"({len(dataset.schedule['season'].unique())} seasons)...",
+            f"({len(seasons)} seasons)...",
             file=sys.stderr,
         )
         df = regenerate_features_for_dataset(
-            cfg, dataset.schedule, seasons=args.seasons
+            cfg, dataset.schedule, seasons=seasons
         )
         out_path = out_root / dataset_name.lower() / "features.parquet"
         _write_features(df, out_path)
