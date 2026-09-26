@@ -107,14 +107,18 @@ from nflbetting_backtest import (
 
 ## Data-recovery utilities
 
-```bash
-nflbt-backfill-historical-injuries   # nflreadpy -> data/history_injuries.parquet
-nflbt-backfill-historical-weather    # Open-Meteo -> data/weather/weather_cache_historical.parquet
-nflbt-backfill-2025-injuries         # nflreadpy -> data/injuries/history_injuries_2025.parquet
-nflbt-backfill-2025-weather          # Open-Meteo -> data/weather/weather_cache_2025.parquet
-```
+Not shipped. The `nflbt-backfill-*` scripts referenced by earlier drafts
+(`utils/backfill/*`, `PLAN.md`, `IMPLEMENTATION.md`) are **not present** in
+this checkout, and `pyproject.toml` registers only `nflbt-run` and
+`nflbt-regen-features`. The harness reads the parquets under `data/` and
+`NFL-Model-UPDATED/data/` directly, so backfill is not needed to run the
+evaluation.
 
-Each script's `--help` lists its flags.
+To refresh the raw parquets, use the library's scripts (e.g.
+`NFL-Model-UPDATED/scripts/backfill_injuries.py`,
+`NFL-Model-UPDATED/scripts/backfill_weather.py`) or fetch from nflreadpy /
+Open-Meteo. Re-adding framework-side entry points would require restoring
+`src/nflbetting_backtest/utils/backfill/` and the console scripts.
 
 ## Layout
 
@@ -125,23 +129,33 @@ nfl-model-backtesting/
 ├── PLAN.md / IMPLEMENTATION.md
 ├── src/nflbetting_backtest/
 │   ├── datasets.py            # DATASET_FULL, DATASET_2025
-│   ├── backtest.py            # walk_forward_validation, train_period
+│   ├── backtest.py            # walk_forward_validation, train_period, diagnostics
 │   ├── metrics.py             # aggregate_metrics + dataclasses
-│   ├── report.py              # write_metrics_txt, write_predictions_xlsx
+│   ├── report.py              # metrics/xlsx/pkl/comparison/coverage writers
+│   ├── run_card.py            # run metadata
+│   ├── regen_features.py      # nflbt-regen-features entry point
 │   ├── cli.py                 # nflbt-run entry point
-│   └── utils/
-│       ├── weather.py, injuries.py
-│       └── backfill/{historical_weather,historical_injuries,
-│                      season_2025_weather,season_2025_injuries}.py
+│   └── utils/__init__.py
 ├── data/{dataset_full,dataset_2025}/{features,schedule}.parquet
-└── tests/test_outputs_match_baseline.py
+└── tests/
 ```
 
 ## Test
 
-The single acceptance test runs the CLI on both bundled datasets and
-compares every output against the corresponding reference file in
-`NFL-Model-UPDATED/review2026/`:
+`tests/test_outputs_match_baseline.py` runs the CLI on both bundled datasets
+and diffs `metrics.txt` / `predictions.xlsx` against the reference files in
+`reports/baseline/` (`DATASET_FULL.*`, `DATASET_2025.*`). The backtester is
+the source of truth for backtesting; `NFL-Model-UPDATED/review2026/` is dead
+information and is not used.
+
+Regenerate the references in `reports/baseline/` from a known-good baseline
+run before running the test:
+
+```bash
+nflbt-run --no-regenerate-features --out reports
+# copy the relevant run_<TS>/ outputs into reports/baseline/ as
+# DATASET_FULL.* / DATASET_2025.*
+```
 
 ```bash
 pytest tests/

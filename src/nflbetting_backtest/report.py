@@ -6,7 +6,13 @@ from pathlib import Path
 from typing import Iterable, Optional
 import polars as pl
 
-from .metrics import MetricsReport, MetricsBlock, MarketComparison, Prediction
+from .metrics import (
+    MarketComparison,
+    MetricsBlock,
+    MetricsReport,
+    Prediction,
+    paired_significance,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +365,7 @@ def write_comparison_report(
     full_label: str = "full-features",
     short_label: str = "2025-features",
     filter_sections: Optional[list] = None,
+    paired_predictions: Optional[tuple] = None,
 ) -> None:
     """Two-block side-by-side comparison on the same 2025 games.
 
@@ -478,6 +485,50 @@ def write_comparison_report(
                     f"delta={delta:+5.1%}\n"
                 )
             fh.write("\n")
+
+        if paired_predictions is not None:
+            full_preds, short_preds = paired_predictions
+            _write_paired_significance(
+                fh,
+                paired_significance(full_preds, short_preds),
+                full_label,
+                short_label,
+            )
+
+
+def _write_paired_significance(fh, sig, full_label, short_label) -> None:
+    """Same-game paired significance block (W19)."""
+    ats = sig["ats"]
+    fh.write(
+        f"## Paired significance: {full_label} vs {short_label} "
+        "(same games)\n"
+    )
+    fh.write(
+        "# ATS = McNemar exact on decisive common games; MAE/RMSE = paired "
+        "bootstrap of short - full (negative = short better).\n"
+    )
+    if ats["n"]:
+        fh.write(
+            f"  ATS   n={ats['n']}  full {ats['full_wins']}-"
+            f"{ats['full_losses']}  short {ats['short_wins']}-"
+            f"{ats['short_losses']}  McNemar p={ats['mcnemar_p']:.3g}\n"
+        )
+        fh.write(
+            f"        discordant: full-wrong/short-right="
+            f"{ats['b01_full_wrong_short_right']}  "
+            f"full-right/short-wrong={ats['b10_full_right_short_wrong']}\n"
+        )
+    else:
+        fh.write("  ATS   no decisive common games\n")
+    for label, key in (("MAE", "mae"), ("RMSE", "rmse")):
+        metric = sig[key]
+        fh.write(
+            f"  {label:<5} n={metric['n']}  "
+            f"diff(short-full)={metric['diff']:+.3f} "
+            f"[{metric['ci_lower']:+.3f}, {metric['ci_upper']:+.3f}]  "
+            f"p={metric['p_value']:.3g}\n"
+        )
+    fh.write("\n")
 
 
 # ---------------------------------------------------------------------------

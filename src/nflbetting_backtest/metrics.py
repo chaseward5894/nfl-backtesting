@@ -312,6 +312,126 @@ def _market_by_season(predictions):
     return {s: _market([p for p in predictions if p.season == s]) for s in seasons}
 
 
+# ---------------------------------------------------------------------------
+# Paired (same-game) comparison and significance (W19)
+# ---------------------------------------------------------------------------
+
+def ats_outcomes(predictions) -> dict:
+    """Per-game ATS correctness on decisive games (home-margin convention).
+
+    Mirrors ``_ats``: pushes and exact model/market ties are omitted, so
+    keys are the games both models would grade.
+    """
+    outcomes: dict = {}
+    for p in predictions:
+        if p.spread_line is None or p.actual_margin is None:
+            continue
+        market = p.spread_line
+        edge = p.predicted_margin - market
+        if abs(p.actual_margin - market) < 0.25 or abs(edge) < 0.01:
+            continue
+        outcomes[p.game_id] = (
+            p.actual_margin > market if edge > 0 else p.actual_margin < market
+        )
+    return outcomes
+
+
+def paired_significance(
+    full_predictions,
+    short_predictions,
+    *,
+    n_bootstrap: int = 2000,
+    seed: int = 42,
+) -> dict:
+    """Same-game paired comparison of two prediction sets.
+
+    ATS uses McNemar's exact test on the games both sets grade; MAE/RMSE
+    use a paired bootstrap of the per-game errors on the games both sets
+    have an actual margin for. ``short`` is the candidate model.
+    """
+    full_outcomes = ats_outcomes(full_predictions)
+    short_outcomes = ats_outcomes(short_predictions)
+    common_ats = sorted(set(full_outcomes) & set(short_outcomes))
+    n_ats = len(common_ats)
+    full_wins = sum(full_outcomes[g] for g in common_ats)
+    short_wins = sum(short_outcomes[g] for g in common_ats)
+    b10 = sum(1 for g in common_ats if full_outcomes[g] and not short_outcomes[g])
+    b01 = sum(1 for g in common_ats if not full_outcomes[g] and short_outcomes[g])
+    mcnemar_p = (
+        float(stats.binomtest(b01, b01 + b10, 0.5).pvalue)
+        if b01 + b10 > 0
+        else 1.0
+    )
+
+    full_by_game = {p.game_id: p for p in full_predictions}
+    short_by_game = {p.game_id: p for p in short_predictions}
+    common_err = sorted(
+        g
+        for g in set(full_by_game) & set(short_by_game)
+        if full_by_game[g].actual_margin is not None
+        and full_by_game[g].spread_line is not None
+        and short_by_game[g].spread_line is not None
+    )
+    full_err = np.array(
+        [
+            full_by_game[g].predicted_margin - full_by_game[g].actual_margin
+            for g in common_err
+        ]
+    )
+    short_err = np.array(
+        [
+            short_by_game[g].predicted_margin - short_by_game[g].actual_margin
+            for g in common_err
+        ]
+    )
+
+    def _bootstrap(diff_fn):
+        n = len(full_err)
+        if n == 0:
+            return {
+                "diff": 0.0,
+                "ci_lower": 0.0,
+                "ci_upper": 0.0,
+                "p_value": 1.0,
+                "n": 0,
+            }
+        rng = np.random.default_rng(seed)
+        diffs = np.empty(n_bootstrap)
+        for i in range(n_bootstrap):
+            idx = rng.integers(0, n, n)
+            diffs[i] = diff_fn(full_err[idx], short_err[idx])
+        lower, upper = np.percentile(diffs, [2.5, 97.5])
+        p_value = 2.0 * min((diffs <= 0).mean(), (diffs >= 0).mean())
+        return {
+            "diff": float(diff_fn(full_err, short_err)),
+            "ci_lower": float(lower),
+            "ci_upper": float(upper),
+            "p_value": float(min(1.0, p_value)),
+            "n": int(n),
+        }
+
+    mae = _bootstrap(lambda f, s: np.mean(np.abs(s)) - np.mean(np.abs(f)))
+    rmse = _bootstrap(
+        lambda f, s: np.sqrt(np.mean(s**2)) - np.sqrt(np.mean(f**2))
+    )
+
+    return {
+        "ats": {
+            "n": n_ats,
+            "full_wins": int(full_wins),
+            "short_wins": int(short_wins),
+            "full_losses": n_ats - int(full_wins),
+            "short_losses": n_ats - int(short_wins),
+            "b01_full_wrong_short_right": int(b01),
+            "b10_full_right_short_wrong": int(b10),
+            "mcnemar_p": mcnemar_p,
+        },
+        "mae": mae,
+        "rmse": rmse,
+        "common_games": len(common_err),
+    }
+
+
 # Public aggregate
 
 def aggregate_metrics(predictions: Iterable[Prediction]) -> MetricsReport:

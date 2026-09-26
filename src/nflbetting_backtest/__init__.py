@@ -3,7 +3,13 @@
 __version__ = "0.1.0"
 
 from .datasets import Dataset, DATASET_FULL, DATASET_2025
-from .metrics import Prediction, MetricsReport, aggregate_metrics
+from .metrics import (
+    Prediction,
+    MetricsReport,
+    aggregate_metrics,
+    ats_outcomes,
+    paired_significance,
+)
 from .backtest import (
     ChunkSkip,
     SeasonCoverage,
@@ -28,6 +34,8 @@ __all__ = [
     "Prediction",
     "MetricsReport",
     "aggregate_metrics",
+    "ats_outcomes",
+    "paired_significance",
     "walk_forward_validation",
     "train_period",
     "TrainingPeriod",

@@ -490,6 +490,15 @@ def main(argv=None) -> int:
                 }
             )
 
+    full_ids = {p.game_id for p in full_on_2025_preds}
+    short_ids = {p.game_id for p in short_on_2025_preds}
+    if full_ids != short_ids:
+        print(
+            f"comparison coverage differs: full={len(full_ids)} "
+            f"short={len(short_ids)} common={len(full_ids & short_ids)}",
+            file=sys.stderr,
+        )
+
     write_comparison_report(
         full_report=full_on_2025_report,
         short_report=short_on_2025_report,
@@ -499,6 +508,7 @@ def main(argv=None) -> int:
         full_label="full-features",
         short_label="2025-features",
         filter_sections=filter_sections,
+        paired_predictions=(full_on_2025_preds, short_on_2025_preds),
     )
     print(f"comparison -> {run_dir / 'comparison.txt'}", file=sys.stderr)
 

@@ -16,8 +16,9 @@ directory `run_<TS>/` under the user-supplied --out root and writes
     run_<TS>/DATASET_2025.run_card.yaml
     run_<TS>/comparison.txt
 
-The test asserts metrics.txt and predictions.xlsx byte-equal the
-regenerated reference files in NFL-Model-UPDATED/review2026/.
+The test asserts metrics.txt and predictions.xlsx against the reference
+files under ``reports/baseline/`` (the backtester is the source of truth
+for backtesting; ``review2026/`` is dead information).
 """
 
 import os
@@ -33,30 +34,24 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 REFERENCE_ROOT = (
-    REPO_ROOT / "NFL-Model-UPDATED" / "review2026" / "baseline"
+    REPO_ROOT / "nfl-model-backtesting" / "reports" / "baseline"
 )
-PACKAGE_ROOT = REPO_ROOT / "src"
+PACKAGE_ROOT = REPO_ROOT / "nfl-model-backtesting" / "src"
 
 
 # (dataset name, reference files for comparison)
 CASES = [
     {
         "name": "dataset_full",
-        "metrics_ref": REFERENCE_ROOT / "metrics.txt",
-        "xlsx_ref": REFERENCE_ROOT / "baseline.xlsx",
-        "pkl_ref": REFERENCE_ROOT / "predictions.pkl",
+        "metrics_ref": REFERENCE_ROOT / "DATASET_FULL.metrics.txt",
+        "xlsx_ref": REFERENCE_ROOT / "DATASET_FULL.predictions.xlsx",
+        "pkl_ref": REFERENCE_ROOT / "DATASET_FULL.predictions.pkl",
     },
     {
         "name": "dataset_2025",
-        "metrics_ref": (
-            REFERENCE_ROOT / "backtesting_2025" / "metrics_2025.txt"
-        ),
-        "xlsx_ref": (
-            REFERENCE_ROOT / "backtesting_2025" / "backtesting_2025.xlsx"
-        ),
-        "pkl_ref": (
-            REFERENCE_ROOT / "backtesting_2025" / "predictions_2025.pkl"
-        ),
+        "metrics_ref": REFERENCE_ROOT / "DATASET_2025.metrics.txt",
+        "xlsx_ref": REFERENCE_ROOT / "DATASET_2025.predictions.xlsx",
+        "pkl_ref": REFERENCE_ROOT / "DATASET_2025.predictions.pkl",
     },
 ]
 
