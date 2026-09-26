@@ -358,6 +358,7 @@ def write_comparison_report(
     *,
     full_label: str = "full-features",
     short_label: str = "2025-features",
+    filter_sections: Optional[list] = None,
 ) -> None:
     """Two-block side-by-side comparison on the same 2025 games.
 
@@ -461,6 +462,22 @@ def write_comparison_report(
         fh.write(_err_line("Bias",  sb.bias_model, sb.bias_market,
                           sb.bias_diff, lower_is_better=False) + "\n")
         fh.write("\n")
+
+        if filter_sections:
+            fh.write("## All games vs publishable picks (per dataset)\n")
+            fh.write("# ATS uses the home-margin convention (see metrics.txt).\n")
+            for section in filter_sections:
+                all_ats = section["all_report"].aggregate.ats
+                picks_ats = section["filtered_report"].aggregate.ats
+                delta = picks_ats.p_value - all_ats.p_value
+                fh.write(
+                    f"  {section['dataset']:<14} "
+                    f"all={all_ats.p_value:6.1%} (n={section['n_all']:4d})  "
+                    f"picks={picks_ats.p_value:6.1%} "
+                    f"(n={section['n_filtered']:4d})  "
+                    f"delta={delta:+5.1%}\n"
+                )
+            fh.write("\n")
 
 
 # ---------------------------------------------------------------------------

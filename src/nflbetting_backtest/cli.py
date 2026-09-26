@@ -132,6 +132,24 @@ def _make_run_dir(out_root: Path) -> tuple[Path, datetime]:
     return run_dir, now
 
 
+def _effective_skip_criteria(args, cfg):
+    """Resolve the live-skip thresholds.
+
+    Explicit ``--filter-*`` flags win; otherwise the config's
+    ``skip_criteria`` block is used when enabled.
+    """
+    if (
+        args.filter_edge is not None
+        or args.filter_prob is not None
+        or args.filter_spread is not None
+    ):
+        return args.filter_edge, args.filter_prob, args.filter_spread
+    criteria = getattr(cfg, "skip_criteria", None)
+    if criteria is not None and getattr(criteria, "enabled", False):
+        return criteria.min_edge, criteria.min_prob, criteria.max_spread
+    return None, None, None
+
+
 def _run_one_dataset(
     *,
     dataset: Dataset,
@@ -141,7 +159,11 @@ def _run_one_dataset(
     test_weeks: int,
     run_dir: Path,
 ):
-    """Train + predict + write outputs for one dataset. Returns (preds, report)."""
+    """Train + predict + write outputs for one dataset.
+
+    Returns ``(predictions, report, filtered_report, n_filtered)``;
+    ``filtered_report`` is ``None`` when no skip criteria applied.
+    """
     model_cfg = _build_model_config(cfg, dataset, dataset.feature_names)
 
     diagnostics = WalkForwardDiagnostics()
@@ -173,16 +195,16 @@ def _run_one_dataset(
     write_predictions_pkl(preds, run_dir / f"{dataset.name}.predictions.pkl")
     copy_config(args.config, run_dir / f"{dataset.name}.config.yaml.copy")
 
-    # Stage 10: write a filtered metrics report + pkl + xlsx
-    # when the caller passes any --filter-* flag. Filtering
-    # happens via the library's
-    # ``nflbetting.predictions.filter_by_edge`` predicate so the
-    # same predicate applies to the live ``refresh.py`` path.
-    if (
-        args.filter_edge is not None
-        or args.filter_prob is not None
-        or args.filter_spread is not None
-    ):
+    # Stage 10 / W7: the live skip criteria. Explicit --filter-* flags
+    # win; otherwise the config's skip_criteria block is used when
+    # enabled. Filtering goes through the library's filter_by_edge so
+    # the same predicate applies to the live refresh.py path.
+    filter_edge, filter_prob, filter_spread = _effective_skip_criteria(
+        args, cfg
+    )
+    filtered_report = None
+    n_filtered = 0
+    if any(v is not None for v in (filter_edge, filter_prob, filter_spread)):
         from nflbetting.predictions import filter_by_edge
         import polars as _pl
 
@@ -199,12 +221,13 @@ def _run_one_dataset(
         )
         filtered_df = filter_by_edge(
             preds_df,
-            min_edge=args.filter_edge,
-            min_prob=args.filter_prob,
-            max_spread=args.filter_spread,
+            min_edge=filter_edge,
+            min_prob=filter_prob,
+            max_spread=filter_spread,
         )
         keep_ids = set(filtered_df["game_id"].to_list())
         filtered_preds = [p for p in preds if p.game_id in keep_ids]
+        n_filtered = len(filtered_preds)
         filtered_report = aggregate_metrics(filtered_preds)
         write_metrics_txt(
             filtered_report,
@@ -221,7 +244,7 @@ def _run_one_dataset(
             run_dir / f"{dataset.name}.predictions_filtered.pkl",
         )
         print(
-            f"{dataset.name}: filter kept {len(filtered_preds)}/"
+            f"{dataset.name}: publishable {n_filtered}/"
             f"{len(preds)} predictions -> "
             f"{run_dir}/{dataset.name}.*filtered.*",
             file=sys.stderr,
@@ -247,7 +270,7 @@ def _run_one_dataset(
         f"{run_dir}/{dataset.name}.*",
         file=sys.stderr,
     )
-    return preds, report
+    return preds, report, filtered_report, n_filtered
 
 
 def _run_pass_on_2025(
@@ -451,6 +474,22 @@ def main(argv=None) -> int:
         label="2025-features on 2025 schedule",
     )
 
+    filter_sections = []
+    for dataset_name in ("DATASET_FULL", "DATASET_2025"):
+        preds_i, report_i, filtered_report_i, n_filtered_i = results[
+            dataset_name
+        ]
+        if filtered_report_i is not None:
+            filter_sections.append(
+                {
+                    "dataset": dataset_name,
+                    "all_report": report_i,
+                    "filtered_report": filtered_report_i,
+                    "n_all": len(preds_i),
+                    "n_filtered": n_filtered_i,
+                }
+            )
+
     write_comparison_report(
         full_report=full_on_2025_report,
         short_report=short_on_2025_report,
@@ -459,6 +498,7 @@ def main(argv=None) -> int:
         path=run_dir / "comparison.txt",
         full_label="full-features",
         short_label="2025-features",
+        filter_sections=filter_sections,
     )
     print(f"comparison -> {run_dir / 'comparison.txt'}", file=sys.stderr)
 
