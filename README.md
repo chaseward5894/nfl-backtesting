@@ -1,8 +1,7 @@
 # nflbetting-backtest
 
 Backtesting for the [`nflbetting`](https://github.com/chaseward5894/NFL-Model)
-rating model. Ships two pre-built historical datasets and runs a
-walk-forward validation against each.
+rating model.
 
 ## Install
 
@@ -68,20 +67,9 @@ The cross-dataset file at the top of the run directory is:
   DATASET_2025, with delta and verdict per metric, plus an
   all-games vs publishable ATS section per dataset
 
-Default settings are read from `NFL-Model-UPDATED/config.yaml`
-(`regularization: linear`, `test_weeks: 1`, `training_weeks: 60`).
+Default settings are read from `NFL-Model-UPDATED/config.yaml`.
 Override the config file with `--config PATH`, or the output root
 with `--out PATH`.
-
-### Live skip criteria (two ATS reports)
-
-`config.yaml` has a `skip_criteria` block (`enabled`, `min_edge`,
-`min_prob`, `max_spread`). When enabled, `nflbt-run` also emits the
-filtered report/predictions per dataset and `comparison.txt` shows the
-all-games vs publishable ATS gap; the rows kept are exactly those the
-live sheet marks `Publishable`. Explicit `--filter-edge` / `--filter-prob`
-/ `--filter-spread` flags override the config. See
-`NFL-Model-UPDATED/track/live_skip_criteria.md` for the sign convention.
 
 ## Bundled datasets
 
@@ -107,38 +95,11 @@ from nflbetting_backtest import (
 
 ## Data-recovery utilities
 
-Not shipped. The `nflbt-backfill-*` scripts referenced by earlier drafts
-(`utils/backfill/*`, `PLAN.md`, `IMPLEMENTATION.md`) are **not present** in
-this checkout, and `pyproject.toml` registers only `nflbt-run` and
-`nflbt-regen-features`. The harness reads the parquets under `data/` and
-`NFL-Model-UPDATED/data/` directly, so backfill is not needed to run the
-evaluation.
-
 To refresh the raw parquets, use the library's scripts (e.g.
 `NFL-Model-UPDATED/scripts/backfill_injuries.py`,
 `NFL-Model-UPDATED/scripts/backfill_weather.py`) or fetch from nflreadpy /
 Open-Meteo. Re-adding framework-side entry points would require restoring
 `src/nflbetting_backtest/utils/backfill/` and the console scripts.
-
-## Layout
-
-```
-nfl-model-backtesting/
-├── pyproject.toml
-├── README.md
-├── PLAN.md / IMPLEMENTATION.md
-├── src/nflbetting_backtest/
-│   ├── datasets.py            # DATASET_FULL, DATASET_2025
-│   ├── backtest.py            # walk_forward_validation, train_period, diagnostics
-│   ├── metrics.py             # aggregate_metrics + dataclasses
-│   ├── report.py              # metrics/xlsx/pkl/comparison/coverage writers
-│   ├── run_card.py            # run metadata
-│   ├── regen_features.py      # nflbt-regen-features entry point
-│   ├── cli.py                 # nflbt-run entry point
-│   └── utils/__init__.py
-├── data/{dataset_full,dataset_2025}/{features,schedule}.parquet
-└── tests/
-```
 
 ## Test
 
